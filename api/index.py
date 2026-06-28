@@ -27,8 +27,8 @@ from aiogram.client.default import DefaultBotProperties
 # =====================================================================
 # НАСТРОЙКИ
 # =====================================================================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8840290166:AAHxdIPSQmK6E3kBul49R5B6wTd8eMhvjoY")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:[Abdazim_000]@db.kowhhtixvtlmdvzdsanc.supabase.co:5432/postgres")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 WORK_COOLDOWN = 60
 WORK_ENERGY_COST = 15
