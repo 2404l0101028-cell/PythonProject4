@@ -5,7 +5,7 @@ import json
 import os
 import random
 import time
-from http.server import BaseHTTPRequestHandler
+from fastapi import FastAPI, Request
 from itertools import combinations
 
 import asyncpg
@@ -1549,6 +1549,26 @@ HELP_TEXT = (
 )
 
 # =====================================================================
+# FASTAPI WEBHOOK HANDLER
+# =====================================================================
+
+app = FastAPI()
+
+@app.post("/api")
+async def telegram_webhook(request: Request):
+    try:
+        # Инициализируем пул БД при первом запросе
+        await get_db()
+
+        json_data = await request.json()
+        update = Update.model_validate(json_data, context={"bot": bot})
+        await dp.feed_update(bot, update)
+
+    except Exception as e:
+        print(f"Error processing update: {e}")
+
+    return {"status": "ok"}
+# =====================================================================
 # ХЕНДЛЕРЫ — БУНКЕР
 # =====================================================================
 
@@ -2590,46 +2610,3 @@ async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
         updated = await get_user(callback.from_user.id)
         await callback.message.edit_text(build_training_text(updated), reply_markup=get_training_keyboard())
 
-# =====================================================================
-# VERCEL WEBHOOK HANDLER
-# =====================================================================
-
-class handler(BaseHTTPRequestHandler):
-    """
-    Vercel вызывает этот класс для каждого HTTP-запроса.
-    Используем синхронный BaseHTTPRequestHandler и запускаем
-    asyncio внутри через asyncio.run().
-    """
-
-    def do_POST(self):
-        # Верификация секрета (опционально, но рекомендуется)
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
-
-        try:
-            asyncio.run(self._process_update(body))
-        except Exception as e:
-            print(f"Error processing update: {e}")
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"ok": true}')
-
-    def do_GET(self):
-        """Healthcheck endpoint."""
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"ManasWorker bot is running!")
-
-    async def _process_update(self, body: bytes):
-        # Инициализируем БД при первом запросе
-        await get_db()
-
-        update_data = json.loads(body)
-        update = Update.model_validate(update_data)
-        await dp.feed_update(bot, update)
-
-    def log_message(self, format, *args):
-        pass  # Заглушаем стандартные логи
