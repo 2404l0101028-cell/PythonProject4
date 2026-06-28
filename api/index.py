@@ -44,83 +44,88 @@ bot = Bot(
 dp = Dispatcher()
 
 # =====================================================================
-# ПУЛ СОЕДИНЕНИЙ С БД (создаётся один раз на экземпляр функции)
+# ПОДКЛЮЧЕНИЕ К БД — PER-REQUEST (Vercel Serverless совместимо)
+# asyncpg.connect() создаёт одиночное соединение на время запроса.
+# Пул (create_pool) не используется: Vercel убивает окружение после
+# каждого запроса, поэтому пул никогда не переиспользуется, но при
+# этом блокирует адреса сокетов → Errno 99.
 # =====================================================================
-_db_pool: asyncpg.Pool | None = None
+async def get_conn() -> asyncpg.Connection:
+    """Открыть одиночное соединение с БД."""
+    return await asyncpg.connect(DATABASE_URL)
 
 
-async def get_db() -> asyncpg.Pool:
-    global _db_pool
-    if _db_pool is None:
-        _db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
-        await _init_db(_db_pool)
-    return _db_pool
-
-
-async def _init_db(pool: asyncpg.Pool):
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id               BIGINT PRIMARY KEY,
-                balance               INTEGER DEFAULT 0,
-                level                 INTEGER DEFAULT 1,
-                exp                   INTEGER DEFAULT 0,
-                job                   TEXT    DEFAULT 'Безработный',
-                last_work_time        BIGINT  DEFAULT 0,
-                agility               INTEGER DEFAULT 1,
-                endurance             INTEGER DEFAULT 1,
-                charisma              INTEGER DEFAULT 1,
-                intellect             INTEGER DEFAULT 1,
-                luck                  INTEGER DEFAULT 1,
-                communication_level   INTEGER DEFAULT 1,
-                driving_level         INTEGER DEFAULT 0,
-                charisma_level        INTEGER DEFAULT 0,
-                organization_level    INTEGER DEFAULT 0,
-                management_level      INTEGER DEFAULT 0,
-                job_rank              INTEGER DEFAULT 1,
-                has_scooter           INTEGER DEFAULT 0,
-                has_shaker            INTEGER DEFAULT 0,
-                has_laptop            INTEGER DEFAULT 0,
-                has_professor_badge   INTEGER DEFAULT 0,
-                has_logistics_license INTEGER DEFAULT 0,
-                has_import_license    INTEGER DEFAULT 0,
-                has_dean_seal         INTEGER DEFAULT 0,
-                has_business_plan     INTEGER DEFAULT 0,
-                has_franchise_contract INTEGER DEFAULT 0,
-                hp                    INTEGER DEFAULT 100,
-                energy                INTEGER DEFAULT 100
-            )
-        """)
+async def _init_db(conn: asyncpg.Connection):
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id               BIGINT PRIMARY KEY,
+            balance               INTEGER DEFAULT 0,
+            level                 INTEGER DEFAULT 1,
+            exp                   INTEGER DEFAULT 0,
+            job                   TEXT    DEFAULT 'Безработный',
+            last_work_time        BIGINT  DEFAULT 0,
+            agility               INTEGER DEFAULT 1,
+            endurance             INTEGER DEFAULT 1,
+            charisma              INTEGER DEFAULT 1,
+            intellect             INTEGER DEFAULT 1,
+            luck                  INTEGER DEFAULT 1,
+            communication_level   INTEGER DEFAULT 1,
+            driving_level         INTEGER DEFAULT 0,
+            charisma_level        INTEGER DEFAULT 0,
+            organization_level    INTEGER DEFAULT 0,
+            management_level      INTEGER DEFAULT 0,
+            job_rank              INTEGER DEFAULT 1,
+            has_scooter           INTEGER DEFAULT 0,
+            has_shaker            INTEGER DEFAULT 0,
+            has_laptop            INTEGER DEFAULT 0,
+            has_professor_badge   INTEGER DEFAULT 0,
+            has_logistics_license INTEGER DEFAULT 0,
+            has_import_license    INTEGER DEFAULT 0,
+            has_dean_seal         INTEGER DEFAULT 0,
+            has_business_plan     INTEGER DEFAULT 0,
+            has_franchise_contract INTEGER DEFAULT 0,
+            hp                    INTEGER DEFAULT 100,
+            energy                INTEGER DEFAULT 100
+        )
+    """)
 
 
 async def register_user(user_id: int):
-    pool = await get_db()
     luck = random.randint(1, 10)
-    async with pool.acquire() as conn:
+    conn = await get_conn()
+    try:
+        await _init_db(conn)
         await conn.execute(
             "INSERT INTO users (user_id, luck) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             user_id, luck,
         )
+    finally:
+        await conn.close()
 
 
 async def get_user(user_id: int) -> dict | None:
-    pool = await get_db()
-    async with pool.acquire() as conn:
+    conn = await get_conn()
+    try:
+        await _init_db(conn)
         row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+    finally:
+        await conn.close()
     return dict(row) if row else None
 
 
 async def update_user(user_id: int, **kwargs):
     if not kwargs:
         return
-    pool = await get_db()
-    fields = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(kwargs))
-    values = list(kwargs.values())
-    async with pool.acquire() as conn:
+    conn = await get_conn()
+    try:
+        fields = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(kwargs))
+        values = list(kwargs.values())
         await conn.execute(
             f"UPDATE users SET {fields} WHERE user_id = $1",
             user_id, *values,
         )
+    finally:
+        await conn.close()
 
 
 async def get_user_safe(user_id: int) -> dict:
@@ -149,7 +154,7 @@ def scale_coins(base_coins: int, level: int) -> int:
     return int(base_coins * (1 + level * 0.05))
 
 # =====================================================================
-# ВЕТКИ ПРОФЕССИЙ (без изменений из оригинала)
+# ВЕТКИ ПРОФЕССИЙ
 # =====================================================================
 JOBS = {
     "intel_1": {
@@ -977,7 +982,7 @@ async def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, 
                       f"💸 Потеря: <b>-{bet}</b> монет\n📉 Баланс: <b>{new_balance}</b> монет")
 
 # =====================================================================
-# БУНКЕР (полный перенос из оригинала)
+# БУНКЕР
 # =====================================================================
 BUNKER_CLASSIC = {
     "disasters": [
@@ -1245,7 +1250,7 @@ def _bunker_active(chat_id: int) -> BunkerGame | None:
     return g if g and g.phase != "finished" else None
 
 # =====================================================================
-# ПОКЕР (полный перенос из оригинала)
+# ПОКЕР
 # =====================================================================
 POKER_SMALL_BLIND = 10
 POKER_BIG_BLIND = 20
@@ -1547,6 +1552,7 @@ HELP_TEXT = (
     "<b>перевод @username 500</b> или ответом на сообщение <b>перевод 500</b>\n\n"
     "<b>Команда</b> — это меню"
 )
+
 # =====================================================================
 # ХЕНДЛЕРЫ — БУНКЕР
 # =====================================================================
@@ -1927,7 +1933,6 @@ async def poker_start_cmd(message: Message):
 async def _poker_begin(message: Message, game: PokerGame):
     chat_id = game.chat_id
     game.start_game()
-    # Обновляем балансы из БД (сохраняем блайнды)
     for uid, p in game.players.items():
         await update_user(uid, balance=p["balance"])
 
@@ -2019,8 +2024,8 @@ async def _poker_next_turn(message: Message, game: PokerGame):
         f"<i>У тебя {POKER_TURN_SECONDS} секунд</i>"
     )
 
-    # Таймер автофолда — НА VERCEL НЕ РАБОТАЕТ НАДЁЖНО!
-    # Используется как best-effort: если функция жива — сработает
+    # Автофолд-таймер: работает только пока Vercel не убил контейнер.
+    # На практике для serverless это best-effort — не гарантировано.
     if game.turn_task:
         try:
             game.turn_task.cancel()
@@ -2042,7 +2047,7 @@ async def _poker_next_turn(message: Message, game: PokerGame):
     try:
         game.turn_task = asyncio.create_task(auto_fold_task())
     except RuntimeError:
-        pass  # Нет event loop — на Vercel игнорируем
+        pass
 
 
 async def _poker_end_single(message: Message, game: PokerGame, winner_id: int):
@@ -2590,22 +2595,31 @@ async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
         await callback.message.edit_text(build_training_text(updated), reply_markup=get_training_keyboard())
 
 # =====================================================================
-# FASTAPI WEBHOOK HAND
+# FASTAPI WEBHOOK
 # =====================================================================
 
 app = FastAPI()
 
+
 @app.post("/api")
 async def telegram_webhook(request: Request):
-    try:
-        # Инициализируем пул БД при первом запросе
-        await get_db()
+    """
+    Единственная точка входа для Vercel Serverless.
 
+    Правила:
+    - Нет глобального пула БД (create_pool удалён).
+    - Нет uvicorn.run() / dp.start_polling() / asyncio.run().
+    - Каждый DB-запрос открывает и закрывает соединение самостоятельно.
+    - Всегда возвращает {"status": "ok"}, даже при ошибке БД или парсинга.
+    """
+    try:
         json_data = await request.json()
         update = Update.model_validate(json_data, context={"bot": bot})
         await dp.feed_update(bot, update)
-
     except Exception as e:
-        print(f"Error processing update: {e}")
+        # Выводим полный traceback в логи Vercel (видно в Functions → Logs)
+        import traceback
+        print(f"[webhook error] {type(e).__name__}: {e}")
+        print(traceback.format_exc())
 
     return {"status": "ok"}
