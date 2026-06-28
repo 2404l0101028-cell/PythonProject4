@@ -1547,27 +1547,6 @@ HELP_TEXT = (
     "<b>перевод @username 500</b> или ответом на сообщение <b>перевод 500</b>\n\n"
     "<b>Команда</b> — это меню"
 )
-
-# =====================================================================
-# FASTAPI WEBHOOK HANDLER
-# =====================================================================
-
-app = FastAPI()
-
-@app.post("/api")
-async def telegram_webhook(request: Request):
-    try:
-        # Инициализируем пул БД при первом запросе
-        await get_db()
-
-        json_data = await request.json()
-        update = Update.model_validate(json_data, context={"bot": bot})
-        await dp.feed_update(bot, update)
-
-    except Exception as e:
-        print(f"Error processing update: {e}")
-
-    return {"status": "ok"}
 # =====================================================================
 # ХЕНДЛЕРЫ — БУНКЕР
 # =====================================================================
@@ -2610,3 +2589,23 @@ async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
         updated = await get_user(callback.from_user.id)
         await callback.message.edit_text(build_training_text(updated), reply_markup=get_training_keyboard())
 
+# =====================================================================
+# FASTAPI WEBHOOK HAND
+# =====================================================================
+
+app = FastAPI()
+
+@app.post("/api")
+async def telegram_webhook(request: Request):
+    try:
+        # Инициализируем пул БД при первом запросе
+        await get_db()
+
+        json_data = await request.json()
+        update = Update.model_validate(json_data, context={"bot": bot})
+        await dp.feed_update(bot, update)
+
+    except Exception as e:
+        print(f"Error processing update: {e}")
+
+    return {"status": "ok"}
